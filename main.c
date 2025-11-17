@@ -3,8 +3,10 @@
  */
 
 #include <errno.h>
+#include <execinfo.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,17 +31,52 @@ static int shm_fd;
 static void *sh_ptr;
 static struct tc_time *g_tct;
 
+#define DEBUG 1
+#ifdef DEBUG
+
+#define FILE_PATH_DBG "/tmp/log-tc"
+static FILE *fdbg;
+
+static int debug_init(void)
+{
+	fdbg = fopen(FILE_PATH_DBG, "w");
+	if (!fdbg)
+		return -1;
+
+	return 0;
+}
+
+static void dbg(char *msg, ...)
+{
+	va_list l;
+
+	va_start(l, msg);
+	vfprintf(fdbg, msg, l);
+	va_end(l);
+}
+#else
+static void dbg(char *msg, ...) {}
+#endif /* DEBUG */
+
 static void exit_clock()
 {
+	dbg("%s() called\n", __func__);
+
 	munmap(sh_ptr, sizeof (struct tc_time)) ;
 	close(shm_fd);
 	shm_unlink(SH_MEM_TC);
+
+#ifdef DEBUG
+	fclose(fdbg);
+#endif
 }
 
 static void print_time(struct tc_time *tct)
 {
 	if (tct) {
 		printf("%02d.%02d.%02d", tct->hrs, tct->min, tct->sec);
+	} else {
+		dbg("%s() cannot print, no tct\n", __func__);
 	}
 }
 
@@ -48,8 +85,10 @@ static void timer_signal_handler(int signum, siginfo_t *info, void *context)
 	if (!g_tct->active)
 		return;
 
-	if (!g_tct)
+	if (!g_tct) {
+		dbg("%s() cannot print, no g_tct\n", __func__);
 		return;
+	}
 
 	g_tct->sec -= 1;
 	if (g_tct->sec < 0) {
@@ -141,9 +180,33 @@ static void execute_command(int cmd)
 
 static void ctrl_c_handler(int sig)
 {
+	dbg("%s()\n", __func__);
+
 	if (sh_ptr && g_tct)
 		exit_clock();
 
+	exit(1);
+}
+
+static void segfault_handler(int sig)
+{
+	void *array[512];
+	char **strings;
+	int i, size;
+
+	dbg("SEGMENTATION FAULT\n");
+
+	size = backtrace(array, 10);
+	strings = backtrace_symbols(array, size);
+
+	for (i = 0; i < size; i++)
+		dbg("%s\n", strings[i]);
+
+	free(strings);
+}
+static void x_signal_handler(int sig)
+{
+	dbg("EXITING FOR SIGNAL: %d\n");
 	exit(1);
 }
 
@@ -154,7 +217,21 @@ int main(int argc, char **argv)
 	struct sigevent sigevt;
 	struct itimerspec alarm;
 
+#ifdef DEBUG
+	if (debug_init())
+		exit(-1);
+
+	dbg("textclock debug started\n");
+#endif
+
 	if (argc == 1) {
+		if (signal(SIGINT, ctrl_c_handler))
+			return errno;
+		if (signal(SIGSEGV, segfault_handler))
+			return errno;
+		if (signal(SIGQUIT, x_signal_handler))
+			return errno;
+
 		if (setup_shared_memory()) {
 			fprintf(stderr, "cannot create shared memmory\n");
 			return -1;
@@ -165,9 +242,6 @@ int main(int argc, char **argv)
 	} else {
 		exit(1);
 	}
-
-	if (signal(SIGINT, ctrl_c_handler))
-		return errno;
 
 	sigemptyset(&sigact.sa_mask);
 	sigact.sa_sigaction = timer_signal_handler;
