@@ -153,16 +153,20 @@ static void execute_command(int cmd)
 		break;
 	case 'H':
 		tct->hrs++;
+		print_time(tct);
 		break;
 	case 'h':
 		if (tct->hrs)
 			tct->hrs--;
+		print_time(tct);
 		break;
 	case 'M':
-		tct->min = (tct->min == 59) ? 0 : tct->min++;
+		tct->min = (tct->min == 59) ? 0 : tct->min + 1;
+		print_time(tct);
 		break;
 	case 'm':
-		tct->min = (tct->min == 0) ? 59 : tct->min--;
+		tct->min = (tct->min == 0) ? 59 : tct->min - 1;
+		print_time(tct);
 		break;
 	case 'r':
 		tct->active = false;
