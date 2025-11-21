@@ -32,16 +32,21 @@ static void *sh_ptr;
 static struct tc_time *g_tct;
 
 #define DEBUG 1
+
 #ifdef DEBUG
 
 #define FILE_PATH_DBG "/tmp/log-tc"
 static FILE *fdbg;
 
-static int debug_init(void)
+static int debug_init(int cmd)
 {
-	fdbg = fopen(FILE_PATH_DBG, "w");
-	if (!fdbg)
+	const char *fn = cmd ? FILE_PATH_DBG "-cmd" : FILE_PATH_DBG;
+
+	fdbg = fopen(fn, "w");
+	if (!fdbg) {
+		fprintf(stderr, "cannot create debug file\n");
 		return -1;
+	}
 
 	return 0;
 }
@@ -53,6 +58,8 @@ static void dbg(char *msg, ...)
 	va_start(l, msg);
 	vfprintf(fdbg, msg, l);
 	va_end(l);
+
+	fflush(fdbg);
 }
 #else
 static void dbg(char *msg, ...) {}
@@ -67,6 +74,7 @@ static void exit_clock()
 	shm_unlink(SH_MEM_TC);
 
 #ifdef DEBUG
+	fflush(fdbg);
 	fclose(fdbg);
 #endif
 }
@@ -222,19 +230,30 @@ int main(int argc, char **argv)
 	struct itimerspec alarm;
 
 #ifdef DEBUG
-	if (debug_init())
+	if (debug_init(argc > 1))
 		exit(-1);
 
-	dbg("textclock debug started\n");
+	dbg("textclock debug started, argc = %d\n", argc);
 #endif
 
 	if (argc == 1) {
-		if (signal(SIGINT, ctrl_c_handler))
+		dbg("setting signal for ctrl_c\n");
+		if (signal(SIGINT, ctrl_c_handler) == SIG_ERR) {
+			dbg("cannot set ctrl_c handler, err: %d\n", errno);
 			return errno;
-		if (signal(SIGSEGV, segfault_handler))
+		}
+		dbg("setting signal for segfault\n");
+		if (signal(SIGSEGV, segfault_handler) == SIG_ERR) {
+			dbg("cannot set segv handler, err: %d\n", errno);
 			return errno;
-		if (signal(SIGQUIT, x_signal_handler))
+		}
+		dbg("setting signal for x\n");
+		if (signal(SIGQUIT, x_signal_handler) == SIG_ERR) {
+			dbg("cannot set sig x handler, err: %d\n", errno);
 			return errno;
+		}
+
+		dbg("setting up shared memory\n");
 
 		if (setup_shared_memory()) {
 			fprintf(stderr, "cannot create shared memmory\n");
@@ -244,8 +263,11 @@ int main(int argc, char **argv)
 		execute_command(argv[1][0]);
 		exit(0);
 	} else {
+		dbg("wrong arg number\n");
 		exit(1);
 	}
+
+	dbg("creatig timer\n");
 
 	sigemptyset(&sigact.sa_mask);
 	sigact.sa_sigaction = timer_signal_handler;
@@ -270,6 +292,8 @@ int main(int argc, char **argv)
 	/* starting timer */
 	if (timer_settime(sec_timer, 0, &alarm, NULL))
 		return errno;
+
+	dbg("sleeping loop\n");
 
 	for (;;) {
 		sleep(1);
