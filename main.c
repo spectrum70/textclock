@@ -18,6 +18,7 @@
 #include <sys/types.h>
 
 #define SH_MEM_TC	"/shmtc.01"
+#define FILE_PATH_LOCK	"/tmp/tc-lock"
 
 struct tc_time {
 	int active;
@@ -65,6 +66,25 @@ static void dbg(char *msg, ...)
 static void dbg(char *msg, ...) {}
 #endif /* DEBUG */
 
+static int prg_lock()
+{
+	FILE *fl;
+	struct stat statbuf;
+
+	if (stat(FILE_PATH_LOCK, &statbuf) == 0)
+		return -1;
+
+	fl = fopen(FILE_PATH_LOCK, "w+");
+	if (!fl) {
+		fprintf(stderr, "cannot create lock file\n");
+		return -1;
+	}
+	fwrite(" ", 1, 1, fl);
+	fclose(fl);
+
+	return 0;
+}
+
 static void exit_clock()
 {
 	dbg("%s() called\n", __func__);
@@ -106,6 +126,7 @@ static void timer_signal_handler(int signum, siginfo_t *info, void *context)
 			g_tct->min = 59;
 			g_tct->hrs--;
 			if (g_tct->hrs < 0) {
+				g_tct->active = 0;
 			}
 		}
 	}
@@ -194,6 +215,8 @@ static void ctrl_c_handler(int sig)
 {
 	dbg("%s()\n", __func__);
 
+	unlink(FILE_PATH_LOCK);
+
 	if (sh_ptr && g_tct)
 		exit_clock();
 
@@ -206,6 +229,8 @@ static void segfault_handler(int sig)
 	char **strings;
 	int i, size;
 
+	unlink(FILE_PATH_LOCK);
+
 	dbg("SEGMENTATION FAULT\n");
 
 	size = backtrace(array, 10);
@@ -216,9 +241,13 @@ static void segfault_handler(int sig)
 
 	free(strings);
 }
+
+/* System sends this before kill, t can be handled at least to close files. */
 static void x_signal_handler(int sig)
 {
-	dbg("EXITING FOR SIGNAL: %d\n");
+	unlink(FILE_PATH_LOCK);
+
+	dbg("EXITING FOR SIGNAL: %d\n", sig);
 	exit(1);
 }
 
@@ -247,10 +276,22 @@ int main(int argc, char **argv)
 			dbg("cannot set segv handler, err: %d\n", errno);
 			return errno;
 		}
-		dbg("setting signal for x\n");
+		dbg("setting signals for x\n");
 		if (signal(SIGQUIT, x_signal_handler) == SIG_ERR) {
-			dbg("cannot set sig x handler, err: %d\n", errno);
+			fprintf(stderr, "cannot set SIGQUIT handler, err: %d\n",
+				errno);
 			return errno;
+		}
+		if (signal(SIGTERM, x_signal_handler) == SIG_ERR) {
+			fprintf(stderr, "cannot set SIGTERM handler, err: %d\n",
+				errno);
+			return errno;
+		}
+
+		if (prg_lock()) {
+			printf("program already running, exiting.\n");
+			dbg("setting signal for ctrl_c\n");
+			return -1;
 		}
 
 		dbg("setting up shared memory\n");
@@ -301,6 +342,8 @@ int main(int argc, char **argv)
 
 	timer_delete(sec_timer);
 	exit_clock();
+
+	unlink(FILE_PATH_LOCK);
 
 	return 0;
 }
