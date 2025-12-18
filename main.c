@@ -123,11 +123,13 @@ static void timer_signal_handler(int signum, siginfo_t *info, void *context)
 		g_tct->sec = 59;
 		g_tct->min--;
 		if (g_tct->min < 0) {
+			if (g_tct->hrs == 0) {
+				g_tct->min = 0;
+				g_tct->active = 0;
+				return;
+			}
 			g_tct->min = 59;
 			g_tct->hrs--;
-			if (g_tct->hrs < 0) {
-				g_tct->active = 0;
-			}
 		}
 	}
 }
