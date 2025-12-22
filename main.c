@@ -110,13 +110,8 @@ static void print_time(struct tc_time *tct)
 
 static void timer_signal_handler(int signum, siginfo_t *info, void *context)
 {
-	if (!g_tct->active)
+	if (!g_tct || !g_tct->active)
 		return;
-
-	if (!g_tct) {
-		dbg("%s() cannot print, no g_tct\n", __func__);
-		return;
-	}
 
 	g_tct->sec -= 1;
 	if (g_tct->sec < 0) {
@@ -169,8 +164,10 @@ static void execute_command(int cmd)
 	int sfd;
 
 	sfd = shm_open(SH_MEM_TC, O_RDWR, 0644);
-	if (sfd == -1)
+	if (sfd < 0) {
+		printf("bad-clock\n");
 		return;
+	}
 
 	struct tc_time *tct = (struct tc_time *)
 		mmap(NULL, sizeof(struct tc_time),
@@ -232,6 +229,7 @@ static void segfault_handler(int sig)
 	int i, size;
 
 	unlink(FILE_PATH_LOCK);
+	shm_unlink(SH_MEM_TC);
 
 	dbg("SEGMENTATION FAULT\n");
 
@@ -248,6 +246,7 @@ static void segfault_handler(int sig)
 static void x_signal_handler(int sig)
 {
 	unlink(FILE_PATH_LOCK);
+	shm_unlink(SH_MEM_TC);
 
 	dbg("EXITING FOR SIGNAL: %d\n", sig);
 	exit(1);
